@@ -11,7 +11,7 @@ import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.databind.json.JsonMapper
 import com.fasterxml.jackson.module.kotlin.KotlinModule
 import com.lagradost.cloudstream3.animeproviders.*
-import com.lagradost.cloudstream3.liveproviders.EjaTv
+//import com.lagradost.cloudstream3.liveproviders.EjaTv
 import com.lagradost.cloudstream3.metaproviders.CrossTmdbProvider
 import com.lagradost.cloudstream3.movieproviders.*
 import com.lagradost.cloudstream3.providersnsfw.*
@@ -46,132 +46,19 @@ object APIHolder {
     val allProviders =
         arrayListOf(
             // Movie providers
-            ElifilmsProvider(),
-            EstrenosDoramasProvider(),
-            PelisplusProvider(),
-            PelisplusHDProvider(),
-            PeliSmartProvider(),
-            MeloMovieProvider(), // Captcha for links
-            DoramasYTProvider(),
-            CinecalidadProvider(),
-            CuevanaProvider(),
-            EntrepeliculasyseriesProvider(),
-            PelisflixProvider(),
-            SeriesflixProvider(),
-            IHaveNoTvProvider(), // Documentaries provider
-            VMoveeProvider(),
-            AllMoviesForYouProvider(),
-            VidEmbedProvider(),
-            VfFilmProvider(),
-            VfSerieProvider(),
-            FrenchStreamProvider(),
-            AsianLoadProvider(),
-            AsiaFlixProvider(), // This should be removed in favor of asianembed.io, same source
-            EjaTv(),
-            BflixProvider(),
-            FmoviesToProvider(),
-            SflixProProvider(),
-            FilmanProvider(),
-            SflixProvider(),
-            DopeboxProvider(),
-            SolarmovieProvider(),
-            PinoyMoviePediaProvider(),
-            PinoyHDXyzProvider(),
-            PinoyMoviesEsProvider(),
-            TrailersTwoProvider(),
-            TwoEmbedProvider(),
-            DramaSeeProvider(),
-            WatchAsianProvider(),
-            DramaidProvider(),
-            KdramaHoodProvider(),
-            AkwamProvider(),
-            MyCimaProvider(),
-            CimaNowProvider(),
-            EgyBestProvider(),
-            FaselHDProvider(),
-            SoaptwoDayProvider(),
-            HDMProvider(),// disabled due to cloudflare
-            TheFlixToProvider(),
-            StreamingcommunityProvider(),
-            TantifilmProvider(),
-            CineblogProvider(),
-            IlGenioDelloStreamingProvider(),
-            AltadefinizioneProvider(),
-            FilmpertuttiProvider(),
-            HDMovie5(),
-            RebahinProvider(),
-            LayarKacaProvider(),
-            HDTodayProvider(),
-            OpenVidsProvider(),
-            IdlixProvider(),
-            MultiplexProvider(),
-            VidSrcProvider(),
-            UakinoProvider(),
-            PhimmoichillProvider(),
-            HDrezkaProvider(),
-            YomoviesProvider(),
-            SuperStream(),
-
-
+            LoklokProvider(),
+            
             // Metadata providers
             //TmdbProvider(),
             CrossTmdbProvider(),
 
-            // Anime providers
-            WatchCartoonOnlineProvider(),
-            GogoanimeProvider(),
-            AllAnimeProvider(),
-            AnimekisaProvider(),
-            //ShiroProvider(), // v2 fucked me
-            AnimeFlickProvider(),
-            AnimeflvnetProvider(),
-            AnimefenixProvider(),
-            AnimeflvIOProvider(),
-            JKAnimeProvider(),
-            TenshiProvider(),
-            WcoProvider(),
-            AnimePaheProvider(),
-            NineAnimeProvider(),
-            AnimeWorldProvider(),
-            AnimeSaturnProvider(),
-            AniPlayProvider(),
-            ZoroProvider(),
-            DubbedAnimeProvider(),
-            MonoschinosProvider(),
-            MundoDonghuaProvider(),
-            KawaiifuProvider(), // disabled due to cloudflare
-            NeonimeProvider(),
-            KuramanimeProvider(),
+            // Anime providers            
             OploverzProvider(),
-            GomunimeProvider(),
-            NontonAnimeIDProvider(),
-            KuronimeProvider(),
-            OtakudesuProvider(),
-            AnimeIndoProvider(),
-            AnimeSailProvider(),
-            TocanimeProvider(),
-            //MultiAnimeProvider(),
-            NginxProvider(),
-            OlgplyProvider(),
-            AniflixProvider(),
-            KimCartoonProvider(),
-            XcineProvider(),
-
+            
             // Additional providers
-            KrunchyProvider(),
+            //KrunchyProvider(),
 
-            // All of NSFW sources
-            Javhdicu(),
-            JavSubCo(),
-            JavFreeSh(),
-            OpJavCom(),
-            Vlxx(),
-            Xvideos(),
-            Pornhub(),
-            HentaiLa(),
-            JKHentai(),
-            Hanime(),
-            HahoMoe(),
+            // All of NSFW sources            
         )
 
 
