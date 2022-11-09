@@ -1,185 +1,180 @@
 package com.lagradost.cloudstream3.movieproviders
 
+import com.fasterxml.jackson.annotation.JsonProperty
 import com.lagradost.cloudstream3.*
-import com.lagradost.cloudstream3.LoadResponse.Companion.addDuration
-import com.lagradost.cloudstream3.mvvm.logError
+import com.lagradost.cloudstream3.mvvm.safeApiCall
+import com.lagradost.cloudstream3.utils.AppUtils.parseJson
+import com.lagradost.cloudstream3.utils.AppUtils.toJson
 import com.lagradost.cloudstream3.utils.ExtractorLink
-import com.lagradost.cloudstream3.utils.loadExtractor
-import org.jsoup.Jsoup
+import com.lagradost.cloudstream3.utils.SubtitleHelper
+import com.lagradost.cloudstream3.utils.getQualityFromName
+import kotlinx.coroutines.delay
 
-class AllMoviesForYouProvider : MainAPI() {
-    companion object {
-        fun getType(t: String): TvType {
-            return when {
-                t.contains("series") -> TvType.TvSeries
-                t.contains("movies") -> TvType.Movie
-                else -> TvType.Movie
-            }
-        }
-    }
-
-    // Fetching movies will not work if this link is outdated.
-    override var mainUrl = "https://allmoviesforyou.net"
-    override var name = "AllMoviesForYou"
+class Loklok : MainAPI() {
+    override var name = "Loklok"
     override val hasMainPage = true
+    override val hasChromecastSupport = true
+    override val instantLinkLoading = true
     override val supportedTypes = setOf(
         TvType.Movie,
-        TvType.TvSeries
+        TvType.TvSeries,
+        TvType.Anime,
+        TvType.AsianDrama,
     )
 
-    override suspend fun getMainPage(page: Int, request : MainPageRequest): HomePageResponse {
-        val items = ArrayList<HomePageList>()
-        val soup = app.get(mainUrl).document
-        val urls = listOf(
-            Pair("Movies", "section[data-id=movies] article.TPost.B"),
-            Pair("TV Series", "section[data-id=series] article.TPost.B"),
-        )
-        for ((name, element) in urls) {
-            try {
-                val home = soup.select(element).map {
-                    val title = it.selectFirst("h2.title")!!.text()
-                    val link = it.selectFirst("a")!!.attr("href")
-                    TvSeriesSearchResponse(
-                        title,
-                        link,
-                        this.name,
-                        TvType.Movie,
-                        fixUrl(it.selectFirst("figure img")!!.attr("data-src")),
-                        null,
-                        null,
-                    )
-                }
+    private val headers = mapOf(
+        "lang" to "en",
+        "versioncode" to "11",
+        "clienttype" to "ios_jike_default"
+    )
 
-                items.add(HomePageList(name, home))
-            } catch (e: Exception) {
-                logError(e)
+    // no license found
+    // thanks to https://github.com/napthedev/filmhot for providing API
+    companion object {
+        private val api = base64DecodeAPI("dg==LnQ=b2s=a2w=bG8=aS4=YXA=ZS0=aWw=b2I=LW0=Z2E=Ly8=czo=dHA=aHQ=")
+        private val apiUrl = "$api/${base64Decode("Y21zL2FwcA==")}"
+        private val searchApi = base64Decode("aHR0cHM6Ly9sb2tsb2suY29t")
+        private const val mainImageUrl = "https://images.weserv.nl"
+
+        private fun base64DecodeAPI(api: String): String {
+            return api.chunked(4).map { base64Decode(it) }.reversed().joinToString("")
+        }
+
+    }
+
+    private fun encode(input: String): String =
+        java.net.URLEncoder.encode(input, "utf-8").replace("+", "%20")
+
+    override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
+        val home = ArrayList<HomePageList>()
+        for (i in 0..6) {
+//            delay(500)
+            app.get("$apiUrl/homePage/getHome?page=$i", headers = headers)
+                .parsedSafe<Home>()?.data?.recommendItems
+                ?.filterNot { it.homeSectionType == "BLOCK_GROUP" }
+                ?.filterNot { it.homeSectionType == "BANNER" }
+                ?.mapNotNull { res ->
+                    val header = res.homeSectionName ?: return@mapNotNull null
+                    val media = res.media?.mapNotNull { media -> media.toSearchResponse() }
+                        ?: throw ErrorLoadingException("Invalid Json Reponse")
+                    home.add(HomePageList(header, media))
+                }
+        }
+        return HomePageResponse(home)
+    }
+
+    private fun Media.toSearchResponse(): SearchResponse? {
+
+        return newMovieSearchResponse(
+            title ?: name ?: return null,
+            UrlData(id, category).toJson(),
+            TvType.Movie,
+        ) {
+            this.posterUrl = (imageUrl ?: coverVerticalUrl)?.let {
+                "$mainImageUrl/?url=${encode(it)}&w=175&h=246&fit=cover&output=webp"
             }
         }
-        if (items.size <= 0) throw ErrorLoadingException()
-        return HomePageResponse(items)
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
-        val url = "$mainUrl/?s=$query"
-        val document = app.get(url).document
+        val res = app.get(
+            "$searchApi/search?keyword=$query",
+        ).document
 
-        val items = document.select("ul.MovieList > li > article > a")
-        return items.map { item ->
-            val href = item.attr("href")
-            val title = item.selectFirst("> h2.Title")!!.text()
-            val img = fixUrl(item.selectFirst("> div.Image > figure > img")!!.attr("data-src"))
-            val type = getType(href)
-            if (type == TvType.Movie) {
-                MovieSearchResponse(title, href, this.name, type, img, null)
-            } else {
-                TvSeriesSearchResponse(
-                    title,
-                    href,
-                    this.name,
-                    type,
-                    img,
-                    null,
-                    null
-                )
+        val script = res.select("script").find { it.data().contains("function(a,b,c,d,e") }?.data()
+            ?.substringAfter("searchResults:[")?.substringBefore("]}],fetch")
+
+        return res.select("div.search-list div.search-video-card").mapIndexed { num, block ->
+            val name = block.selectFirst("h2.title")?.text()
+            val data = block.selectFirst("a")?.attr("href")?.split("/")
+            val id = data?.last()
+            val type = data?.get(2)?.toInt()
+            val image = Regex("coverVerticalUrl:\"(.*?)\",").findAll(script.toString())
+                .map { it.groupValues[1] }.toList().getOrNull(num)?.replace("\\u002F", "/")
+
+
+            newMovieSearchResponse(
+                "$name",
+                UrlData(id, type).toJson(),
+                TvType.Movie,
+            ) {
+                this.posterUrl = image
             }
+
         }
+
     }
 
-//    private fun getLink(document: Document): List<String>? {
-//         val list = ArrayList<String>()
-//         Regex("iframe src=\"(.*?)\"").find(document.html())?.groupValues?.get(1)?.let {
-//             list.add(it)
-//         }
-//         document.select("div.OptionBx")?.forEach { element ->
-//             val baseElement = element.selectFirst("> a.Button")
-//             val elementText = element.selectFirst("> p.AAIco-dns")?.text()
-//             if (elementText == "Streamhub" || elementText == "Dood") {
-//                 baseElement?.attr("href")?.let { href ->
-//                     list.add(href)
-//                 }
-//             }
-//         }
-//
-//         return if (list.isEmpty()) null else list
-//     }
+    override suspend fun load(url: String): LoadResponse? {
+        val data = parseJson<UrlData>(url)
+        val res = app.get(
+            "$apiUrl/movieDrama/get?id=${data.id}&category=${data.category}",
+            headers = headers
+        ).parsedSafe<Load>()?.data ?: throw ErrorLoadingException("Invalid Json Reponse")
 
-    override suspend fun load(url: String): LoadResponse {
-        val type = getType(url)
-
-        val document = app.get(url).document
-
-        val title = document.selectFirst("h1.Title")!!.text()
-        val descipt = document.selectFirst("div.Description > p")!!.text()
-        val rating =
-            document.selectFirst("div.Vote > div.post-ratings > span")?.text()?.toRatingInt()
-        val year = document.selectFirst("span.Date")?.text()
-        val duration = document.selectFirst("span.Time")!!.text()
-        val backgroundPoster =
-            fixUrlNull(document.selectFirst("div.Image > figure > img")?.attr("data-src"))
-
-        if (type == TvType.TvSeries) {
-            val list = ArrayList<Pair<Int, String>>()
-
-            document.select("main > section.SeasonBx > div > div.Title > a").forEach { element ->
-                val season = element.selectFirst("> span")?.text()?.toIntOrNull()
-                val href = element.attr("href")
-                if (season != null && season > 0 && !href.isNullOrBlank()) {
-                    list.add(Pair(season, fixUrl(href)))
-                }
+        val episodes = res.episodeVo?.map { eps ->
+            val definition = eps.definitionList?.map {
+                Definition(
+                    it.code,
+                    it.description,
+                )
             }
-            if (list.isEmpty()) throw ErrorLoadingException("No Seasons Found")
-
-            val episodeList = ArrayList<Episode>()
-
-            for (season in list) {
-                val seasonResponse = app.get(season.second).text
-                val seasonDocument = Jsoup.parse(seasonResponse)
-                val episodes = seasonDocument.select("table > tbody > tr")
-                if (episodes.isNotEmpty()) {
-                    episodes.forEach { episode ->
-                        val epNum = episode.selectFirst("> td > span.Num")?.text()?.toIntOrNull()
-                        val poster = episode.selectFirst("> td.MvTbImg > a > img")?.attr("data-src")
-                        val aName = episode.selectFirst("> td.MvTbTtl > a")
-                        val name = aName!!.text()
-                        val href = aName.attr("href")
-                        val date = episode.selectFirst("> td.MvTbTtl > span")?.text()
-
-                        episodeList.add(
-                            newEpisode(href) {
-                                this.name = name
-                                this.season = season.first
-                                this.episode = epNum
-                                this.posterUrl = fixUrlNull(poster)
-                                addDate(date)
-                            }
-                        )
-                    }
-                }
+            val subtitling = eps.subtitlingList?.map {
+                Subtitling(
+                    it.languageAbbr,
+                    it.language,
+                    it.subtitlingUrl
+                )
             }
-            return TvSeriesLoadResponse(
-                title,
-                url,
-                this.name,
-                type,
-                episodeList,
-                backgroundPoster,
-                year?.toIntOrNull(),
-                descipt,
-                null,
-                rating
+            Episode(
+                data = UrlEpisode(
+                    data.id.toString(),
+                    data.category,
+                    eps.id,
+                    definition,
+                    subtitling
+                ).toJson(),
+                episode = eps.seriesNo
             )
-        } else {
-            return newMovieLoadResponse(
-                title,
-                url,
-                type,
-                fixUrl(url)
-            ) {
-                posterUrl = backgroundPoster
-                this.year = year?.toIntOrNull()
-                this.plot = descipt
-                this.rating = rating
-                addDuration(duration)
+        } ?: throw ErrorLoadingException("No Episode Found")
+        val recommendations = res.likeList?.mapNotNull { rec ->
+            rec.toSearchResponse()
+        }
+
+        val type = when {
+            data.category == 0 -> {
+                TvType.Movie
+            }
+            data.category != 0 && res.tagNameList?.contains("Anime") == true -> {
+                TvType.Anime
+            }
+            else -> {
+                TvType.TvSeries
+            }
+        }
+
+        return newTvSeriesLoadResponse(
+            res.name ?: return null,
+            url,
+            type,
+            episodes
+        ) {
+            this.posterUrl = res.coverVerticalUrl
+            this.year = res.year
+            this.plot = res.introduction
+            this.tags = res.tagNameList
+            this.rating = res.score.toRatingInt()
+            this.recommendations = recommendations
+        }
+
+    }
+
+    private fun getLanguage(str: String): String {
+        return when (str) {
+            "in_ID" -> "Indonesian"
+            "pt" -> "Portuguese"
+            else -> str.split("_").first().let {
+                SubtitleHelper.fromTwoLettersToLanguage(it).toString()
             }
         }
     }
@@ -190,17 +185,146 @@ class AllMoviesForYouProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        val doc = app.get(data).document
-        val iframe = doc.select("body iframe").map { fixUrl(it.attr("src")) }
-        iframe.apmap { id ->
-            if (id.contains("trembed")) {
-                val soup = app.get(id).document
-                soup.select("body iframe").map {
-                    val link = fixUrl(it.attr("src").replace("streamhub.to/d/", "streamhub.to/e/"))
-                    loadExtractor(link, data, subtitleCallback, callback)
+
+        val res = parseJson<UrlEpisode>(data)
+
+        res.definitionList?.apmap { video ->
+            safeApiCall {
+                delay(500)
+                app.get(
+                    "$apiUrl/media/previewInfo?category=${res.category}&contentId=${res.id}&episodeId=${res.epId}&definition=${video.code}",
+                    headers = headers
+                ).parsedSafe<Video>()?.data.let { link ->
+                    callback.invoke(
+                        ExtractorLink(
+                            this.name,
+                            this.name,
+                            link?.mediaUrl ?: return@let,
+                            "",
+                            getQualityFromName(video.description),
+                            isM3u8 = true,
+                            headers = headers
+                        )
+                    )
                 }
-            } else loadExtractor(id, data, subtitleCallback, callback)
+            }
         }
+
+        res.subtitlingList?.map { sub ->
+            subtitleCallback.invoke(
+                SubtitleFile(
+                    getLanguage(sub.languageAbbr ?: return@map),
+                    sub.subtitlingUrl ?: return@map
+                )
+            )
+        }
+
         return true
     }
+
+    data class UrlData(
+        val id: Any? = null,
+        val category: Int? = null,
+    )
+
+    data class Subtitling(
+        val languageAbbr: String? = null,
+        val language: String? = null,
+        val subtitlingUrl: String? = null,
+    )
+
+    data class Definition(
+        val code: String? = null,
+        val description: String? = null,
+    )
+
+    data class UrlEpisode(
+        val id: String? = null,
+        val category: Int? = null,
+        val epId: Int? = null,
+        val definitionList: List<Definition>? = arrayListOf(),
+        val subtitlingList: List<Subtitling>? = arrayListOf(),
+    )
+
+    data class VideoData(
+        @JsonProperty("mediaUrl") val mediaUrl: String? = null,
+    )
+
+    data class Video(
+        @JsonProperty("data") val data: VideoData? = null,
+    )
+
+    data class SubtitlingList(
+        @JsonProperty("languageAbbr") val languageAbbr: String? = null,
+        @JsonProperty("language") val language: String? = null,
+        @JsonProperty("subtitlingUrl") val subtitlingUrl: String? = null,
+    )
+
+    data class DefinitionList(
+        @JsonProperty("code") val code: String? = null,
+        @JsonProperty("description") val description: String? = null,
+    )
+
+    data class EpisodeVo(
+        @JsonProperty("id") val id: Int? = null,
+        @JsonProperty("seriesNo") val seriesNo: Int? = null,
+        @JsonProperty("definitionList") val definitionList: ArrayList<DefinitionList>? = arrayListOf(),
+        @JsonProperty("subtitlingList") val subtitlingList: ArrayList<SubtitlingList>? = arrayListOf(),
+    )
+
+    data class MediaDetail(
+        @JsonProperty("name") val name: String? = null,
+        @JsonProperty("introduction") val introduction: String? = null,
+        @JsonProperty("year") val year: Int? = null,
+        @JsonProperty("category") val category: String? = null,
+        @JsonProperty("coverVerticalUrl") val coverVerticalUrl: String? = null,
+        @JsonProperty("score") val score: String? = null,
+        @JsonProperty("episodeVo") val episodeVo: ArrayList<EpisodeVo>? = arrayListOf(),
+        @JsonProperty("likeList") val likeList: ArrayList<Media>? = arrayListOf(),
+        @JsonProperty("tagNameList") val tagNameList: ArrayList<String>? = arrayListOf(),
+    )
+
+    data class Load(
+        @JsonProperty("data") val data: MediaDetail? = null,
+    )
+
+    data class MediaSearch(
+        @JsonProperty("id") val id: String? = null,
+        @JsonProperty("domainType") val domainType: Int? = null,
+        @JsonProperty("name") val name: String? = null,
+        @JsonProperty("coverVerticalUrl") val coverVerticalUrl: String? = null,
+    )
+
+    data class Result(
+        @JsonProperty("result") val result: ArrayList<MediaSearch>? = arrayListOf(),
+    )
+
+    data class Search(
+        @JsonProperty("pageProps") val pageProps: Result? = null,
+    )
+
+    data class Media(
+        @JsonProperty("id") val id: Any? = null,
+        @JsonProperty("category") val category: Int? = null,
+        @JsonProperty("imageUrl") val imageUrl: String? = null,
+        @JsonProperty("coverVerticalUrl") val coverVerticalUrl: String? = null,
+        @JsonProperty("title") val title: String? = null,
+        @JsonProperty("name") val name: String? = null,
+        @JsonProperty("jumpAddress") val jumpAddress: String? = null,
+    )
+
+    data class RecommendItems(
+        @JsonProperty("homeSectionName") val homeSectionName: String? = null,
+        @JsonProperty("homeSectionType") val homeSectionType: String? = null,
+        @JsonProperty("recommendContentVOList") val media: ArrayList<Media>? = arrayListOf(),
+    )
+
+    data class Data(
+        @JsonProperty("recommendItems") val recommendItems: ArrayList<RecommendItems>? = arrayListOf(),
+    )
+
+    data class Home(
+        @JsonProperty("data") val data: Data? = null,
+    )
+
 }
