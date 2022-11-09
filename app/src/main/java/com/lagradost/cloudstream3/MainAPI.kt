@@ -46,7 +46,7 @@ object APIHolder {
     val allProviders =
         arrayListOf(
             // Movie providers
-            LoklokProvider(),
+            AllMoviesForYouProvider(),
             
             // Metadata providers
             //TmdbProvider(),
